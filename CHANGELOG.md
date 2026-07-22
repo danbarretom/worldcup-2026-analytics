@@ -1,5 +1,31 @@
 ## [Unreleased]
 
+### Adicionado (infra do banco)
+- `docker-compose.yml`: Postgres 16 (alpine) local, credenciais via `.env` (gitignored, `.env.example` versionado como template).
+- `src/etl/load_to_postgres.py`: carrega os 10 CSVs reais de `data/raw/` nas tabelas do `sql/schema.sql`, respeitando ordem de FK. Rodado com sucesso 2026-07-22: 104 partidas, 834 eventos, 208 linhas de stats por time, 1248 jogadores, 5408 escalações — contagens batendo exatamente com os CSVs de origem, sem violação de FK (o próprio Postgres teria rejeitado o insert).
+- `historical_champions` segue vazia de propósito — população a partir da Wikipedia é uma etapa separada, pausada a pedido do Daniel (ele quer participar ativamente de decisões de captação/tratamento de dado, ver seção abaixo).
+
+### Correções de schema encontradas durante o ETL (dado real ≠ descrição publicada)
+- `match_events.minute` vem com notação de acréscimo (`"90+6"`, `"120+1"`) — 19 de 834 linhas. Schema corrigido pra `minute` (base: 45/90/120 = fim do 1º tempo/2º tempo/prorrogação) + `stoppage_minute` (nullable), em vez de um único número (que erraria o tempo real de jogo) ou um texto solto (que perderia a capacidade de filtrar/ordenar numericamente).
+- `match_events.event_type` inclui `'Penalty Shootout Goal'`/`'Penalty Shootout Miss'` (21 caracteres) — coluna alargada de `VARCHAR(20)` pra `VARCHAR(30)`. Achado bônus: as cobranças de pênalti são registradas evento a evento, não só o placar final da disputa.
+- `match_lineups.is_starting_xi` vem como `0`/`1` inteiro no CSV, não `true`/`false` — conversão explícita no ETL antes do insert (coluna já era `BOOLEAN` no schema, só faltava o cast no lado do pandas).
+
+### Decisões de dado discutidas com o Daniel (2026-07-22)
+A partir daqui, qualquer decisão sobre extração/tratamento/modelagem de dado passa a ser discutida com ele antes de implementar — é a área de expertise principal dele no projeto, diferente de infra/tooling/docs que podem seguir no automático.
+- **`players.goals` → `pre_tournament_intl_goals`** (renomeado do rascunho anterior, que estava como `career_goals`): verificado contra o número real do Cristiano Ronaldo — 143 nessa coluna + 3 em `player_stats.goals` (só do torneio) = 146, batendo com o total real dele pós-Copa. Confirmado que é gols pela seleção **antes** da Copa 2026, não gol de carreira (clube+seleção, que seria ~900+).
+- **`match_team_stats.player_of_the_match` (texto) vs. `matches.player_of_the_match_id` (FK)**: checado se eram realmente redundantes antes de manter a decisão de dropar o texto. Achado um bug real na fonte: 7 jogadores têm `player_name = "Mc"` literal em `squads_and_players.csv` (bug no gerador cortando sobrenomes Mc-), replicado em `player_stats.csv` (mesma coluna copiada, não é fonte independente). **Corrigido 2026-07-22**: Daniel pesquisou manualmente e identificou os 7 (tabela abaixo); aplicado `UPDATE` na tabela `players` do Postgres e embutida a mesma correção em `src/etl/load_to_postgres.py` (dict `PLAYER_NAME_CORRECTIONS`) pra sobreviver a um reload completo a partir do CSV bruto, que senão reintroduziria o bug.
+
+    | player_id | seleção | clube | nome real |
+    |---|---|---|---|
+    | 290 | Escócia | SSC Napoli | Scott McTominay |
+    | 293 | Escócia | Aston Villa FC | John McGinn |
+    | 309 | Escócia | Norwich City FC | Kenny McLean |
+    | 312 | Escócia | GNK Dinamo Zagreb | Scott McKenna |
+    | 320 | EUA | Juventus FC | Weston McKennie |
+    | 334 | EUA | Toulouse FC | Mark McKenzie |
+    | 722 | Nova Zelândia | Silkeborg IF | Callum McCowatt |
+- **`match_prediction_features.csv`** (66 colunas, claramente um dataset de features de ML — tem `match_result` H/D/A como target): decisão revisada. Em vez de excluir totalmente (decisão original, considerada cedo demais), mantido como CSV em `data/raw/` sem virar tabela ainda — a maior parte já é derivável do que já modelamos (`home_fifa_rank`/`elo` já estão em `teams`), mas tem colunas únicas que podem interessar depois (`home_rest_days`/`away_rest_days`, totais de elenco). Schema fica pra quando algum módulo precisar de uma coluna específica.
+
 ### Adicionado
 - Estrutura inicial do repositório: `data/{raw,processed}`, `sql/`, `src/`, `app/`, `notebooks/`, `tests/`, `.gitignore`, `requirements.txt`.
 - CI/CD (`.github/workflows/ci-cd.yml`), espelhando o padrão usado no `TrabalhoAV3Refatorado`: testes em push/PR pra `main`/`dev`, release automática ao mergear uma branch `release/*` em `main`, lendo a versão da primeira linha deste changelog.
@@ -17,9 +43,10 @@ Fui além da checklist inicial da Fase 1 e inspecionei o `generate_dataset.py` (
 - **Checagem de integridade referencial** rodada contra os CSVs reais (script em `python`/pandas, não versionado — validação pontual): zero violações de FK em `matches`/`match_events`/`match_team_stats`/`match_lineups`/`squads_and_players`, zero duplicatas de PK, zero partida com `home_team_id = away_team_id`, zero nulos nas colunas obrigatórias de `matches`. Schema em `sql/schema.sql` já reflete essa estrutura validada.
 
 ### Decisões de design do schema
-- `match_prediction_features.csv` (65 features de ML) e `matches_detailed.csv` (join denormalizado) **não viraram tabelas**: o primeiro não serve ao objetivo do projeto (testar teses, não prever resultado); o segundo foi recriado como `VIEW` (`matches_detailed`) pra não guardar uma cópia denormalizada que pode dessincronizar das tabelas-base.
-- `player_stats.csv` foi normalizado: as colunas `player_name`/`team_id`/`position`, redundantes com `players`, foram descartadas da tabela — acessíveis via `JOIN` por `player_id`.
+- `matches_detailed.csv` (join denormalizado) **não virou tabela**: recriado como `VIEW` (`matches_detailed`) pra não guardar uma cópia denormalizada que pode dessincronizar das tabelas-base. `match_prediction_features.csv` também não tem tabela ainda, mas a decisão sobre ele foi revisada — ver "Decisões de dado discutidas com o Daniel" acima.
+- `player_stats.csv` foi normalizado: as colunas `player_name`/`team_id`/`position`, redundantes com `players`, foram descartadas da tabela — acessíveis via `JOIN` por `player_id`. (A coluna `player_of_the_match` de `match_team_stats` também foi descartada nesse mesmo espírito, mas essa decisão específica só foi verificada contra o dado real depois — ver "Decisões de dado discutidas com o Daniel" acima, inclui o bug dos 7 jogadores "Mc".)
 - `historical_champions` é uma tabela nova, sem equivalente no dataset Kaggle (que só cobre 2026) — existe especificamente pra alimentar o Módulo A com dado histórico via Wikipedia, com `goals_conceded_per_game` como coluna gerada (`GENERATED ALWAYS AS ... STORED`).
+- `players.goals` (fonte) foi renomeado pra `pre_tournament_intl_goals` — nome anterior `career_goals` estava incorreto, ver "Decisões de dado discutidas com o Daniel" acima.
 
 ### Validação de fontes (perguntas em aberto da Fase 1, `project-scope.md` seção 8)
 - **Dataset Kaggle `mominullptr/fifa-world-cup-2026-dataset`**: confirmado relacional, 12 tabelas (`teams`, `venues`, `tournament_stages`, `referees`, `matches`, `matches_detailed`, `squads_and_players`, `match_events`, `match_team_stats`, `match_lineups`, `player_stats`, `match_prediction_features`). `match_events.csv` é evento-a-evento com minuto (gols, assistências, cartões, VAR); `match_team_stats.csv` traz estatísticas agregadas por time por partida (posse, finalizações, escanteios, faltas, impedimentos, defesas), não evento-a-evento de finalização. **Cobre só a Copa 2026** — nenhum dado histórico de Copas anteriores. Isso confirma que o Módulo A (comparação histórica de gols sofridos por campeão) depende de Wikipedia/outra fonte, não deste dataset; e que o Módulo C (finalizações/xG minuto a minuto na final) provavelmente vai precisar trabalhar com os totais agregados de `match_team_stats` em vez de um evento por finalização — a granularidade exata só será confirmada ao inspecionar o CSV real (a descrição pública pode não ser exaustiva).

@@ -55,6 +55,9 @@ CREATE TABLE teams (
 CREATE TABLE players (
     player_id      INTEGER PRIMARY KEY,
     team_id        SMALLINT NOT NULL REFERENCES teams (team_id),
+    -- Known source data-quality bug: 7 players (mostly Scotland/USA squads)
+    -- have player_name truncated to literally "Mc" in the source CSV — see
+    -- CHANGELOG.md for the full list and correction status.
     player_name    VARCHAR(100) NOT NULL,
     position        VARCHAR(10),
     club_team      VARCHAR(100),
@@ -62,9 +65,12 @@ CREATE TABLE players (
     caps           SMALLINT,
     date_of_birth  DATE,
     height_cm      SMALLINT,
-    -- Pre-tournament career/international goals (roster bio stat) — distinct
-    -- from player_stats.goals below, which counts goals in this tournament.
-    career_goals   SMALLINT
+    -- Goals scored for the national team BEFORE the 2026 tournament (verified
+    -- against Cristiano Ronaldo's real tally: 143 here + 3 in player_stats.goals
+    -- = 146, matching his actual post-2026 total) — NOT a club+country career
+    -- total. Distinct from player_stats.goals, which counts goals in this
+    -- tournament only.
+    pre_tournament_intl_goals SMALLINT
 );
 
 CREATE INDEX idx_players_team ON players (team_id);
@@ -96,13 +102,19 @@ CREATE INDEX idx_matches_home_team ON matches (home_team_id);
 CREATE INDEX idx_matches_away_team ON matches (away_team_id);
 
 CREATE TABLE match_events (
-    event_id   INTEGER PRIMARY KEY,
-    match_id   SMALLINT NOT NULL REFERENCES matches (match_id),
-    minute     SMALLINT NOT NULL,
-    -- 'Goal' / 'Assist' / 'Yellow Card' / 'Red Card' / 'VAR Review'.
+    event_id         INTEGER PRIMARY KEY,
+    match_id         SMALLINT NOT NULL REFERENCES matches (match_id),
+    -- Source minute is notated like "90+6" or "120+1" for stoppage time.
+    -- Split into base minute (45/90/120 marks which period: 1st half, 2nd
+    -- half or extra time) + nullable stoppage_minute, instead of collapsing
+    -- to a single number, which would misrepresent elapsed match time.
+    minute           SMALLINT NOT NULL,
+    stoppage_minute  SMALLINT,
+    -- 'Goal' / 'Assist' / 'Yellow Card' / 'Red Card' / 'VAR Review' /
+    -- 'Penalty Shootout Goal' / 'Penalty Shootout Miss'.
     -- Goal-and-card level, not a shot-by-shot event stream — see Module C
     -- note in CHANGELOG.md before assuming per-shot timing is available here.
-    event_type VARCHAR(20) NOT NULL,
+    event_type VARCHAR(30) NOT NULL,
     team_id    SMALLINT NOT NULL REFERENCES teams (team_id),
     player_id  INTEGER REFERENCES players (player_id)
 );
