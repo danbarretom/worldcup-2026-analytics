@@ -1,0 +1,88 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+  pull_request:
+    branches: [ "main", "dev" ]
+    types: [ opened, synchronize, reopened, closed ]
+
+permissions:
+  contents: write # Permissão obrigatória para o bot criar a Release
+
+jobs:
+  # ==========================================
+  # JOB 1: INTEGRAÇÃO CONTÍNUA (CI)
+  # ==========================================
+  testes:
+    name: Rodar testes
+    # Não roda quando o evento é só o fechamento/merge do PR (já foi testado no push/synchronize)
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Executar testes
+        # Exit code 5 = nenhum teste coletado ainda (projeto em fase inicial); trata como sucesso.
+        # Qualquer outra falha (exit code != 0 e != 5) derruba o job normalmente.
+        run: pytest || [ $? -eq 5 ]
+
+  # ==========================================
+  # JOB 2: ENTREGA CONTÍNUA (CD) - AUTO RELEASE
+  # ==========================================
+  release:
+    name: Criar Release no GitHub
+    # Roda só quando um PR de release/* é mesclado na main
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Extrair versão do CHANGELOG.md
+        id: extract_version
+        run: |
+          VERSION=$(head -1 CHANGELOG.md | sed -E 's/^## \[([^]]+)\].*/\1/')
+          if [ -z "$VERSION" ] || [ "$VERSION" = "Unreleased" ]; then
+            echo "::error::Não foi possível extrair a versão da primeira linha '## [X.Y.Z]' do CHANGELOG.md (ainda está como [Unreleased]?)"
+            exit 1
+          fi
+          echo "VERSION=v$VERSION" >> "$GITHUB_ENV"
+
+      - name: Verificar se a release já existe
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "::error::A release $VERSION já existe. Abortando para evitar duplicidade."
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Criar tag e publicar Release
+        run: |
+          echo "Gerando tag e Release automática para ${VERSION}"
+          gh release create "$VERSION" \
+            --target main \
+            --title "Release ${VERSION}" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
