@@ -34,3 +34,7 @@ data/processed/*
 .DS_Store
 Thumbs.db
 CLAUDE.md
+
+# Local-only one-off research scripts (not part of the reproducible pipeline;
+# some scrape undocumented third-party APIs, kept out of the public repo on purpose)
+scripts/

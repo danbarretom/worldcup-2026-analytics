@@ -175,11 +175,98 @@ CREATE TABLE player_stats (
 );
 
 -- ============================================================================
+-- Team tournament-aggregate stats from FIFA's own official data (Gracenote-
+-- powered "gameday" backend behind fifa.com's team-statistics page for 2026 —
+-- reverse-engineered, no public docs; see CHANGELOG.md). One row per team,
+-- whole-tournament totals/averages, NOT per-match — a different grain than
+-- match_team_stats above. Loaded from a one-off local script, not part of
+-- src/etl/ (this is FIFA-official enrichment, not the base Kaggle dataset).
+-- Adds real official xG, passing/defending action counts, pressing proxies,
+-- and physical tracking data (distance/speed/sprints) that the Kaggle
+-- dataset doesn't have at all.
+-- ============================================================================
+
+CREATE TABLE team_tournament_stats_fifa (
+    team_id       SMALLINT PRIMARY KEY REFERENCES teams (team_id),
+
+    -- Attacking
+    avg_shots               NUMERIC(4, 1),
+    avg_shots_on_target     NUMERIC(4, 1),
+    avg_shots_off_target    NUMERIC(4, 1),
+    avg_shots_inside_box    NUMERIC(4, 1),
+    avg_shots_outside_box   NUMERIC(4, 1),
+    avg_headed_shots        NUMERIC(4, 1),
+    avg_xg                  NUMERIC(4, 2),
+    avg_assists             NUMERIC(4, 2),
+    avg_big_chances_created NUMERIC(4, 2),
+    avg_big_chances_missed  NUMERIC(4, 2),
+    avg_possession_pct      NUMERIC(4, 1),
+    avg_corners              NUMERIC(4, 1),
+    penalties_scored         SMALLINT,
+    total_own_goals          SMALLINT,
+
+    -- Distribution
+    avg_passes                    NUMERIC(6, 1),
+    pass_accuracy_pct             NUMERIC(5, 4),
+    avg_crosses                   NUMERIC(4, 1),
+    crossing_accuracy_pct         NUMERIC(5, 4),
+    avg_long_balls                NUMERIC(5, 1),
+    avg_linebreaks_attempted      NUMERIC(5, 1),
+    linebreak_accuracy_pct        NUMERIC(5, 4),
+    avg_switches_of_play          NUMERIC(4, 1),
+    switches_of_play_accuracy_pct NUMERIC(5, 4),
+
+    -- Defending
+    avg_tackles                            NUMERIC(4, 1),
+    avg_interceptions                      NUMERIC(4, 1),
+    avg_clearances                         NUMERIC(4, 1),
+    duel_win_pct                           NUMERIC(5, 4),
+    avg_fouls_committed                    NUMERIC(4, 1),
+    avg_offsides                           NUMERIC(4, 1),
+    avg_forced_turnovers                   NUMERIC(5, 1),
+    avg_ball_recovery_time                 NUMERIC(5, 2), -- avg seconds, not per-game total
+    avg_defensive_pressures_applied        NUMERIC(6, 1), -- pressing-intensity proxy
+    avg_direct_defensive_pressures_applied NUMERIC(5, 1),
+
+    -- Discipline
+    total_yellow_cards       SMALLINT,
+    total_red_cards          SMALLINT,
+    total_indirect_red_cards SMALLINT, -- second-yellow dismissals, already included in total_red_cards
+
+    -- Goalkeeping
+    avg_saves NUMERIC(4, 1),
+
+    -- Physical (2026+ only — GPS/tracking data didn't exist for older tournaments)
+    avg_distance_covered_km NUMERIC(6, 2), -- whole-team total per match, not per-player
+    avg_speed_kmh            NUMERIC(4, 2),
+    avg_sprints              NUMERIC(6, 1),
+
+    -- Movement (off-the-ball positioning/receiving)
+    avg_offers_to_receive_total                        NUMERIC(6, 1),
+    avg_offers_to_receive_in_behind                     NUMERIC(5, 1),
+    avg_offers_to_receive_in_between                    NUMERIC(5, 1),
+    avg_offers_to_receive_in_front                      NUMERIC(5, 1),
+    avg_offers_to_receive_inside                        NUMERIC(5, 1),
+    avg_offers_to_receive_outside                       NUMERIC(5, 1),
+    avg_receptions_in_behind                            NUMERIC(4, 1),
+    avg_receptions_between_midfield_and_defensive_line  NUMERIC(5, 1),
+    avg_receptions_under_pressure                       NUMERIC(5, 1),
+
+    data_source   VARCHAR(50) NOT NULL DEFAULT 'FIFA official (Gracenote gameday API)',
+    last_updated  DATE
+);
+
+-- ============================================================================
 -- Historical data — NOT in the Kaggle dataset (2026-only, confirmed in
--- CHANGELOG.md). Populated from Wikipedia for Module A (Spain 2026's
--- defensive record vs. every past champion). Kept as a small standalone
--- table rather than trying to force decades of loosely-structured historical
--- box scores into the match-level schema above.
+-- CHANGELOG.md). Populated for Module A (Spain 2026's defensive record vs.
+-- past champions). Scope fixed at 1958-2022 (17 tournaments) with Daniel
+-- 2026-07-22 — pre-1958 excluded even from this baseline, too different an
+-- era of football for a meaningful comparison. games_played/goals_conceded
+-- sourced from thesoccerworldcups.com (cross-checked against FIFA's own
+-- "fewest goals conceded" record citations), not Wikipedia as originally
+-- planned — see CHANGELOG.md. Kept as a small standalone table rather than
+-- forcing decades of loosely-structured historical box scores into the
+-- match-level schema above.
 -- ============================================================================
 
 CREATE TABLE historical_champions (
@@ -189,7 +276,7 @@ CREATE TABLE historical_champions (
     goals_conceded          SMALLINT NOT NULL,
     goals_conceded_per_game NUMERIC(4, 2) GENERATED ALWAYS AS
         (ROUND(goals_conceded::numeric / NULLIF(games_played, 0), 2)) STORED,
-    source                  VARCHAR(100) NOT NULL DEFAULT 'Wikipedia'
+    source                  VARCHAR(100) NOT NULL
 );
 
 -- ============================================================================
