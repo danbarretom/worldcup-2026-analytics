@@ -27,8 +27,17 @@ data/processed/*
 .vscode/
 .idea/
 
-# Streamlit
-.streamlit/secrets.toml
+# R
+.Rhistory
+.RData
+.Rproj.user/
+renv/library/
+renv/python/
+renv/staging/
+analysis/r/output/
+analysis/r/*.html
+analysis/r/*_files/
+.quarto/
 
 # OS
 .DS_Store

@@ -83,15 +83,18 @@ Portugal/CR7 em declínio, sucesso do formato de 48 seleções (Cabo Verde, Col�
 
 ## 4. Stack técnico
 
-Mesmo padrão do Letterboxd-Pipeline, por consistência de portfólio e porque você já domina o fluxo:
+Python e R como dois pilares igualmente centrais — Python cuida de engenharia de dados, R cuida de análise
+estatística, e Power BI é a camada de apresentação, os dois lendo do mesmo Postgres:
 
-- **Linguagem/análise:** Python (pandas, SQL via `psycopg2`/SQLAlchemy)
-- **Banco:** PostgreSQL — schema relacional próprio, populado a partir do dataset Kaggle + validação cruzada com football-data.org
-- **Histórico 2022:** `statsbombpy` (StatsBomb Open Data) só para o recorte comparativo do Módulo C/G
-- **Front-end de apresentação:** Streamlit
+- **Engenharia de dados:** Python (pandas, SQL via `psycopg2`/SQLAlchemy) — scraping, ETL, schema e carga no
+  Postgres.
+- **Banco:** PostgreSQL — schema relacional próprio, populado a partir do dataset Kaggle + validação cruzada com football-data.org. Fonte única compartilhada — Python e R leem dele de forma independente, nunca um chamando o outro.
+- **Análise estatística:** R (`DBI`/`RPostgres`, `dplyr`, `ggplot2`, `stats` base pra PCA/Mahalanobis/testes de hipótese) — a camada de rigor estatístico de cada módulo, incluindo os gráficos (`ggplot2`).
+- **Histórico 2022:** `statsbombpy` (StatsBomb Open Data) só para o recorte comparativo do Módulo C/G (Python, ETL)
+- **Apresentação:** Power BI, conectado direto ao Postgres, com visuais de script R embutidos (os gráficos `ggplot2`) ao lado dos visuais nativos. Publicado via "Publish to Web" pra link público gratuito.
 - **Stretch:** scraper próprio para Squawka (avaliação de viabilidade na Fase 1, antes de qualquer commit de código pra isso)
 
-\*quem montou esse stack foi uma sessão de claude convencional, a sessão de claude code tem liberdade para opinar e modificar isso caso entenda que é interessante, sempre focando na ideia de portifolio.
+\*a sessão de claude code tem liberdade para opinar e modificar esse stack caso entenda que é interessante, sempre focando na ideia de portifolio.
 
 ---
 
@@ -115,8 +118,8 @@ Mesmo padrão do Letterboxd-Pipeline, por consistência de portfólio e porque v
 
 - Validar as fontes da tabela acima
 - Modelar e popular o schema PostgreSQL
-- Construir Módulos A, B, C
-- Primeiro deploy do Streamlit com esses três módulos
+- Construir Módulos A, B, C (ETL em Python + camada estatística em R, cada um)
+- Primeiro relatório Power BI publicado com esses três módulos
 
 **Fase 2 — Corpo da narrativa**
 
@@ -128,7 +131,7 @@ Mesmo padrão do Letterboxd-Pipeline, por consistência de portfólio e porque v
 
 - Avaliação final de viabilidade da Squawka → Módulo G se der certo
 - README no mesmo padrão de qualidade do SalesSystem (badges, screenshot/GIF, seção "por que este projeto", link ao vivo)
-- Deploy final
+- Publicação final do Power BI
 
 ---
 

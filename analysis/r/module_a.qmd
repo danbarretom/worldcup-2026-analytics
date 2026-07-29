@@ -1,0 +1,375 @@
+---
+title: "Módulo A — A defesa mais eficiente da história das Copas"
+subtitle: "Preview da análise em R · Copa 2026 Analytics"
+format:
+  html:
+    embed-resources: true
+    theme: cosmo
+    toc: true
+    toc-location: left
+    grid:
+      body-width: 850px
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(DBI)
+library(RPostgres)
+library(dplyr)
+library(ggplot2)
+library(dotenv)
+library(knitr)
+
+dotenv::load_dot_env(file = "../../.env")
+
+MAIN_SCOPE_START_YEAR <- 1994
+accent <- "#2a78d6"
+gray_mark <- "#c9c7bf"
+
+theme_module_a <- theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title.position = "plot",
+    plot.title = element_text(face = "bold"),
+    axis.title = element_text(color = "grey40"),
+    plot.margin = margin(10, 22, 10, 10)
+  )
+
+con <- dbConnect(
+  RPostgres::Postgres(),
+  host = Sys.getenv("POSTGRES_HOST"),
+  port = as.integer(Sys.getenv("POSTGRES_PORT")),
+  dbname = Sys.getenv("POSTGRES_DB"),
+  user = Sys.getenv("POSTGRES_USER"),
+  password = Sys.getenv("POSTGRES_PASSWORD")
+)
+
+champions <- dbGetQuery(con, "SELECT * FROM historical_champions ORDER BY world_cup_year")
+main_scope <- champions %>% filter(world_cup_year >= MAIN_SCOPE_START_YEAR)
+```
+
+## 1. A defesa mais eficiente da história das Copas
+
+```{r hero-numbers}
+#| results: asis
+spain <- champions %>% filter(world_cup_year == 2026)
+xg_df_all <- champions %>% filter(!is.na(xg_against_per_game))
+spain_xga_rank <- which(xg_df_all$world_cup_year[order(xg_df_all$xg_against_per_game)] == 2026)
+
+cat(sprintf(
+  "> **A Espanha 2026 sofreu menos gols que qualquer campeã da história** — %.2f gol/jogo, em %d jogos (o caminho mais longo de qualquer campeão da amostra: nenhum outro venceu em mais de 7 partidas), contra %d torneios comparados (1958-2026).\n>\n> E não é só resultado: entre as %d copas com dado real de xG (2014-2026), a Espanha também foi a que **menos permitiu chances de qualidade** — %.2f xG sofrido/jogo, a menor de todas.\n",
+  spain$goals_conceded_per_game, spain$games_played, nrow(champions),
+  nrow(xg_df_all), spain$xg_against_per_game
+))
+```
+
+```{r ranking-table}
+champions %>% arrange(goals_conceded_per_game) %>%
+  select(world_cup_year, champion_team_name, games_played, goals_conceded, goals_conceded_per_game) %>%
+  kable(digits = 2, col.names = c("Ano", "Campeão", "Jogos", "Gols sofridos", "Gols/jogo"),
+        caption = "Ranking completo — todos os 18 campeões (1958-2026), para referência.")
+```
+
+## 2. Processo vs. resultado — finalizações sofridas x gols sofridos
+
+As 9 copas com dado profundo (1994-2026). A linha diagonal marca a proporção esperada entre
+finalização sofrida e gol sofrido (eixos padronizados) — quem fica em cima dela teve o resultado
+"condizente" com o processo; quem se afasta, para cima ou para baixo, teve sorte ou azar além do
+que a exposição a chutes já explicava.
+
+```{r shots-scatter}
+#| fig-width: 8
+#| fig-height: 6
+ms <- main_scope %>% mutate(
+  is_spain_2026 = world_cup_year == 2026,
+  label = paste(world_cup_year, champion_team_name)
+)
+
+x_mean <- mean(ms$shots_conceded_per_game); x_sd <- sd(ms$shots_conceded_per_game)
+y_mean <- mean(ms$goals_conceded_per_game); y_sd <- sd(ms$goals_conceded_per_game)
+bisector_slope <- y_sd / x_sd
+bisector_intercept <- y_mean - bisector_slope * x_mean
+
+xz <- (ms$shots_conceded_per_game - x_mean) / x_sd
+yz <- (ms$goals_conceded_per_game - y_mean) / y_sd
+ms$bisector_distance <- (yz - xz) / sqrt(2)
+
+italy_pt <- ms %>% filter(champion_team_name == "Italy", world_cup_year == 2006)
+x_origin <- -bisector_intercept / bisector_slope
+
+ggplot(ms, aes(shots_conceded_per_game, goals_conceded_per_game)) +
+  geom_abline(slope = bisector_slope, intercept = bisector_intercept,
+              linetype = "dashed", color = "grey55") +
+  geom_point(aes(color = is_spain_2026, size = is_spain_2026)) +
+  geom_text(aes(label = label, color = is_spain_2026),
+            vjust = -1.3, size = 3.2, show.legend = FALSE, fontface = "bold") +
+  annotate("text", x = italy_pt$shots_conceded_per_game, y = italy_pt$goals_conceded_per_game,
+           label = '("torneio de Buffon")', vjust = 2.6, size = 3, color = "grey45") +
+  scale_color_manual(values = c("TRUE" = accent, "FALSE" = gray_mark), guide = "none") +
+  scale_size_manual(values = c("TRUE" = 4.5, "FALSE" = 3), guide = "none") +
+  scale_x_continuous(breaks = c(round(x_origin, 2), 8, 12, 16)) +
+  scale_y_continuous(breaks = c(0, 0.4, 0.8, 1.2)) +
+  coord_cartesian(xlim = c(x_origin, 17), ylim = c(0, 1.3), clip = "off") +
+  labs(x = "finalizações sofridas por jogo", y = "gols sofridos / jogo") +
+  theme_module_a
+```
+
+> **Itália 2006** e **Argentina 2022** são os dois casos que quebram a proporção esperada, em
+> direções opostas: a Itália sofreu muita finalização e pouquíssimo gol (sorte de goleiro, não
+> impenetrabilidade), a Argentina sofreu pouca finalização — quase tão pouca quanto a Espanha — e
+> ainda assim tomou o dobro de gols de qualquer outro time da amostra. A **Espanha 2026** fica
+> praticamente em cima da linha: seu resultado é exatamente o que o processo já previa, no extremo
+> mais dominante da amostra.
+
+### Distância de cada campanha até a proporção esperada
+
+```{r bisector-table}
+ms %>% arrange(bisector_distance) %>%
+  select(world_cup_year, champion_team_name, shots_conceded_per_game,
+         goals_conceded_per_game, bisector_distance) %>%
+  kable(digits = c(0, 0, 2, 2, 3),
+        col.names = c("Ano", "Campeão", "Finalizações sofridas/jogo", "Gols sofridos/jogo", "Distância à reta"))
+```
+
+**Como essa reta foi calculada**: finalização sofrida (5-15) e gol sofrido (0,1-1,2) estão em
+escalas bem diferentes, então uma proporção "1 finalização = X gols" não é comparável diretamente
+entre os dois eixos. Pra resolver isso, cada eixo foi convertido pra desvios-padrão em relação à
+própria média (z-score) — nessa versão padronizada, a proporção esperada vira uma bissetriz de
+verdade (45°, passando pela origem), e a distância de cada ponto até ela mede exatamente "o quanto
+o resultado de gols dessa campanha destoou do que sua exposição a finalizações, dentro da amostra,
+já previa". A reta do gráfico acima é essa mesma bissetriz **traduzida de volta** pras unidades
+reais (finalizações e gols por jogo) só pra ficar visualmente plotável nos eixos originais — por
+isso ela não passa pela origem (0,0) do gráfico, e sim pelo ponto onde y=0 corresponde a ≈4,38
+finalizações/jogo (o zero "equivalente" dado a média e o espalhamento reais dos 9 times).
+
+**Como ler a distância**: ela é sempre relativa às outras 8 campanhas da amostra, nunca um valor
+absoluto. **Distância negativa** significa que a campanha sofreu, em termos relativos, mais
+finalização do que o número de gols sofridos sugeriria — ela superou a proporção esperada, ou seja,
+converteu exposição a chutes em menos gol do que o "normal" da amostra (caso da Itália 2006:
+muita finalização sofrida, pouquíssimo gol). **Distância positiva** é o inverso: a campanha sofreu,
+em termos relativos, menos finalização do que o número de gols sofridos sugeriria — ficou aquém da
+proporção esperada, convertendo pouca exposição a chutes em mais gol do que o "normal" da amostra
+(caso da Argentina 2022: finalização sofrida quase tão baixa quanto a da Espanha, mas o dobro de
+gols de qualquer outro time). **Distância perto de zero** (caso da Espanha 2026) significa que o
+resultado bateu com o esperado — nem superou, nem ficou aquém da proporção.
+
+## 3. Perfil defensivo — posse e ação defensiva própria, main scope (1994-2026)
+
+A defesa da Espanha começa antes de qualquer desarme: em manter a bola longe do adversário.
+
+```{r style-scatter}
+#| fig-width: 8
+#| fig-height: 6
+style_df <- main_scope %>% arrange(world_cup_year) %>%
+  mutate(total_actions = avg_tackles + avg_interceptions + avg_clearances,
+         label = paste(world_cup_year, champion_team_name),
+         is_spain = champion_team_name == "Spain")
+
+poss_mean <- mean(style_df$avg_possession_pct)
+actions_mean <- mean(style_df$total_actions)
+
+ggplot(style_df, aes(avg_possession_pct, total_actions)) +
+  geom_vline(xintercept = poss_mean, linetype = "dashed", color = "grey60") +
+  geom_hline(yintercept = actions_mean, linetype = "dashed", color = "grey60") +
+  geom_point(aes(color = is_spain, size = is_spain)) +
+  geom_text(aes(label = label, color = is_spain),
+            vjust = -1.3, size = 3.2, show.legend = FALSE, fontface = "bold") +
+  scale_color_manual(values = c("TRUE" = accent, "FALSE" = gray_mark), guide = "none") +
+  scale_size_manual(values = c("TRUE" = 4.5, "FALSE" = 3), guide = "none") +
+  scale_x_continuous(expand = expansion(mult = c(0.08, 0.08))) +
+  scale_y_continuous(expand = expansion(mult = c(0.08, 0.16))) +
+  coord_cartesian(clip = "off") +
+  labs(x = "posse média (%)", y = "ações defensivas / jogo (desarme + intercept. + corte)") +
+  theme_module_a
+```
+
+> As duas campanhas da Espanha (2010 e 2026) são as únicas no quadrante "muita posse, pouca ação
+> defensiva" — o oposto de França 1998 e Brasil 2002, que defendem muito porque têm a bola pouco
+> tempo. A correlação entre posse e volume de ação é moderada (r ≈ -0,45): a tendência existe, mas
+> não é uma regra rígida — daí as linhas de média, não uma reta de tendência.
+
+```{r style-callouts}
+#| results: asis
+spain_style <- style_df %>% filter(world_cup_year == 2026)
+
+cat(sprintf(
+  "> A Espanha 2026 tem a **maior posse** (%.1f%%) **e** a **maior precisão de passe** (%.1f%%) da amostra — junto com a Espanha 2010, é a única a liderar as duas ao mesmo tempo. E tem o **menor volume total de ação defensiva** dos 9 campeões (%.1f/jogo): a dominância não vem de desarmar mais, vem de tirar do adversário a chance de precisar desarmar.\n",
+  spain_style$avg_possession_pct, spain_style$pass_accuracy_pct * 100, spain_style$total_actions
+))
+```
+
+## 4. Pilar de pressão (2026, 32 times do mata-mata)
+
+Não dá pra comparar com outras copas — a comparação é só dentro da própria Copa 2026, contra quem
+realmente competiu (os 32 times que passaram da fase de grupos).
+
+```{r pressing-query}
+pressing <- dbGetQuery(con, "
+  SELECT
+    t.team_name,
+    AVG(CASE WHEN mtsf.stat_name = 'BallRecoveryTime' THEN mtsf.stat_value END) AS recovery_time,
+    AVG(CASE WHEN mtsf.stat_name = 'ForcedTurnovers' THEN mtsf.stat_value END) AS forced_turnovers,
+    AVG(CASE WHEN mtsf.stat_name = 'Possession' THEN mtsf.stat_value END) AS possession,
+    AVG(CASE WHEN mtsf.stat_name = 'PhaseAggregateHighPress' THEN mtsf.stat_value END) AS high_press_pct,
+    AVG(CASE WHEN mtsf.stat_name = 'PhaseAggregateLowBlock' THEN mtsf.stat_value END) AS low_block_pct
+  FROM match_team_stats_fifa mtsf
+  JOIN teams t ON t.team_id = mtsf.team_id
+  WHERE mtsf.team_id IN (
+    SELECT home_team_id FROM matches m JOIN tournament_stages ts ON ts.stage_id = m.stage_id WHERE ts.is_knockout
+    UNION
+    SELECT away_team_id FROM matches m JOIN tournament_stages ts ON ts.stage_id = m.stage_id WHERE ts.is_knockout
+  )
+  GROUP BY t.team_name
+") %>%
+  mutate(
+    minutes_without_ball = 90 * (1 - possession),
+    forced_turnovers_rate = forced_turnovers / minutes_without_ball
+  )
+
+dbDisconnect(con)
+```
+
+### Recuperação de bola
+
+```{r recovery-chart}
+#| fig-width: 8
+#| fig-height: 7.5
+pressing %>%
+  mutate(is_spain = team_name == "Spain") %>%
+  ggplot(aes(x = reorder(team_name, -recovery_time), y = recovery_time, fill = is_spain)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = sprintf("%.1fs", recovery_time)), hjust = -0.15, size = 3, color = "grey30") +
+  coord_flip(clip = "off") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  scale_fill_manual(values = c("TRUE" = accent, "FALSE" = gray_mark), guide = "none") +
+  labs(x = NULL, y = "tempo de recuperação (s)") +
+  theme_module_a + theme(axis.text.y = element_text(size = 8))
+```
+
+### Por que o número bruto engana — recuperações forçadas x minutos sem a bola
+
+```{r confound-scatter}
+#| fig-width: 8
+#| fig-height: 6
+pressing_hl <- pressing %>% mutate(hl = case_when(
+  team_name == "Spain" ~ "Spain",
+  team_name == "Paraguay" ~ "Paraguay",
+  TRUE ~ "other"
+))
+
+ggplot(pressing_hl, aes(forced_turnovers, minutes_without_ball)) +
+  geom_vline(xintercept = mean(pressing$forced_turnovers), linetype = "dashed", color = "grey60") +
+  geom_hline(yintercept = mean(pressing$minutes_without_ball), linetype = "dashed", color = "grey60") +
+  geom_point(aes(color = hl, size = hl != "other")) +
+  geom_text(data = pressing_hl %>% filter(hl != "other"),
+            aes(label = team_name, color = hl), vjust = -1.4, fontface = "bold", show.legend = FALSE) +
+  scale_color_manual(values = c("Spain" = accent, "Paraguay" = "grey30", "other" = gray_mark), guide = "none") +
+  scale_size_manual(values = c("TRUE" = 4.5, "FALSE" = 3), guide = "none") +
+  scale_x_continuous(expand = expansion(mult = c(0.08, 0.08))) +
+  scale_y_continuous(expand = expansion(mult = c(0.08, 0.12))) +
+  coord_cartesian(xlim = c(30, 52), ylim = c(33, 68), clip = "off") +
+  labs(x = "recuperações forçadas / jogo (bruto)", y = "minutos sem a bola / jogo") +
+  theme_module_a
+```
+
+> A Espanha empata com o Paraguai em volume bruto (≈50/jogo), mas o Paraguai levou quase 28 minutos
+> a mais sem a bola pra chegar lá — daí a necessidade da taxa normalizada abaixo.
+
+### Taxa normalizada — recuperações forçadas por minuto sem a bola
+
+```{r rate-chart}
+#| fig-width: 8
+#| fig-height: 7.5
+pressing %>%
+  mutate(is_spain = team_name == "Spain") %>%
+  ggplot(aes(x = reorder(team_name, forced_turnovers_rate), y = forced_turnovers_rate, fill = is_spain)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = sprintf("%.2f", forced_turnovers_rate)), hjust = -0.15, size = 3, color = "grey30") +
+  coord_flip(clip = "off") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  scale_fill_manual(values = c("TRUE" = accent, "FALSE" = gray_mark), guide = "none") +
+  labs(x = NULL, y = "recuperações forçadas / min. sem a bola") +
+  theme_module_a + theme(axis.text.y = element_text(size = 8))
+```
+
+```{r rate-callout}
+#| results: asis
+spain_row <- pressing %>% filter(team_name == "Spain")
+paraguay_row <- pressing %>% filter(team_name == "Paraguay")
+cat(sprintf(
+  "> A Espanha (%.2f) é **~%.0f%% mais eficiente** que o Paraguai (%.2f) por minuto sem a bola — mesmo com muito mais posse.\n",
+  spain_row$forced_turnovers_rate, (spain_row$forced_turnovers_rate / paraguay_row$forced_turnovers_rate - 1) * 100,
+  paraguay_row$forced_turnovers_rate
+))
+```
+
+## 5. Estilo defensivo — pressão alta x bloco baixo
+
+As linhas marcam a média do grupo em cada eixo.
+
+```{r phase-quadrant}
+#| fig-width: 8
+#| fig-height: 6.5
+phase <- pressing %>% select(team_name, high_press_pct, low_block_pct) %>% na.omit() %>%
+  mutate(is_spain = team_name == "Spain")
+
+ggplot(phase, aes(high_press_pct, low_block_pct)) +
+  geom_vline(xintercept = mean(phase$high_press_pct), linetype = "dashed", color = "grey60") +
+  geom_hline(yintercept = mean(phase$low_block_pct), linetype = "dashed", color = "grey60") +
+  geom_point(aes(color = is_spain, size = is_spain)) +
+  geom_text(data = phase %>% filter(is_spain),
+            aes(label = team_name), vjust = -1.4, color = accent, fontface = "bold") +
+  scale_color_manual(values = c("TRUE" = accent, "FALSE" = gray_mark), guide = "none") +
+  scale_size_manual(values = c("TRUE" = 4.5, "FALSE" = 3), guide = "none") +
+  scale_x_continuous(expand = expansion(mult = c(0.05, 0.08))) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.08))) +
+  coord_cartesian(xlim = c(0, 10), ylim = c(0, 45), clip = "off") +
+  labs(x = "% do tempo em pressão alta", y = "% do tempo em bloco baixo") +
+  theme_module_a
+```
+
+### A Espanha é um outlier de verdade, ou só parece no olho?
+
+`high_press_pct` e `low_block_pct` são fortemente correlacionados (as duas métricas medem o mesmo
+eixo de estilo, em direções opostas), então o primeiro componente principal (PC1) **é**, na prática,
+a própria reta de tendência do gráfico acima. Ordenando os 32 times ao longo desse eixo e medindo o
+espaço entre vizinhos consecutivos, dá pra responder objetivamente: o buraco entre a Espanha e o
+time mais próximo é maior que qualquer outro buraco entre dois times vizinhos na fila?
+
+```{r outlier-stats}
+#| results: asis
+r_corr <- cor(phase$high_press_pct, phase$low_block_pct)
+
+pca <- prcomp(phase %>% select(high_press_pct, low_block_pct), center = TRUE, scale. = FALSE)
+scores <- pca$x[, 1]
+spain_idx <- which(phase$team_name == "Spain")
+if (scores[spain_idx] < 0) scores <- -scores
+
+ordered <- phase %>% mutate(pc1 = scores) %>% arrange(desc(pc1))
+gaps <- -diff(ordered$pc1)
+spain_gap <- gaps[1]
+other_gaps <- gaps[-1]
+gap_z <- (spain_gap - mean(other_gaps)) / sd(other_gaps)
+
+rest <- phase %>% filter(team_name != "Spain") %>% select(high_press_pct, low_block_pct)
+spain_vec <- phase %>% filter(team_name == "Spain") %>% select(high_press_pct, low_block_pct) %>% as.matrix()
+maha_spain <- sqrt(mahalanobis(spain_vec, center = colMeans(rest), cov = cov(rest)))
+
+cat(sprintf("- Correlação entre as duas métricas de fase: **r = %.2f**\n", r_corr))
+cat(sprintf("- Gap Espanha → vizinho mais próximo (%s) no eixo PC1: **%.2f**\n", ordered$team_name[2], spain_gap))
+cat(sprintf("- Média de todos os outros gaps consecutivos: %.2f (desvio-padrão = %.2f)\n", mean(other_gaps), sd(other_gaps)))
+cat(sprintf("- O gap da Espanha está **%.1f desvios-padrão** acima da média dos demais gaps (z = %.2f)\n", gap_z, gap_z))
+cat(sprintf("- Distância de Mahalanobis, Espanha vs. distribuição dos outros 31 times: **%.2f**\n", maha_spain))
+```
+
+> A Espanha realmente se destaca do resto do grupo nesse quadrante — não é impressão visual, é um
+> afastamento estatisticamente grande (z ≈ 3,5), mesmo depois de corrigir um bug de escala que
+> inflava esse número num rascunho anterior.
+
+---
+
+*Fonte: `historical_champions` e `match_team_stats_fifa` (Postgres) — StatsBomb, Sofascore e dados
+oficiais da FIFA. Módulo A, Copa 2026 Analytics. Gerado em R (`analysis/r/module_a.qmd`).*

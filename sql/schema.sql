@@ -276,6 +276,49 @@ CREATE TABLE historical_champions (
     goals_conceded          SMALLINT NOT NULL,
     goals_conceded_per_game NUMERIC(4, 2) GENERATED ALWAYS AS
         (ROUND(goals_conceded::numeric / NULLIF(games_played, 0), 2)) STORED,
+
+    -- Deep layer, Module A "beyond raw goals conceded" — populated for the
+    -- 1994-2022 main scope + 2026 (Spain, added as an 18th row here so the
+    -- comparison is one query). 1958-1990 stay NULL on purpose (out of main
+    -- scope; different football era makes the comparison itself weaker, not
+    -- just a data-availability problem — see CHANGELOG.md).
+    shots_conceded_total            SMALLINT,
+    shots_conceded_per_game         NUMERIC(4, 2) GENERATED ALWAYS AS
+        (ROUND(shots_conceded_total::numeric / NULLIF(games_played, 0), 2)) STORED,
+    shots_on_target_conceded_total  SMALLINT,
+    shots_on_target_conceded_per_game NUMERIC(4, 2) GENERATED ALWAYS AS
+        (ROUND(shots_on_target_conceded_total::numeric / NULLIF(games_played, 0), 2)) STORED,
+    -- Sofascore's own "big chance" tag (high-probability chances), not a
+    -- model — a coarser, honestly-labeled stand-in for xG where no shot
+    -- location data exists to compute real xG (pre-2014).
+    big_chances_conceded_total      SMALLINT,
+    big_chances_conceded_per_game   NUMERIC(4, 2) GENERATED ALWAYS AS
+        (ROUND(big_chances_conceded_total::numeric / NULLIF(games_played, 0), 2)) STORED,
+    -- Real xG against — only where a shot-location-based source exists:
+    -- 2014 (whoscored), 2018/2022 (StatsBomb event data), 2026 (FIFA
+    -- official, derived from the opponent's own XG in the same match).
+    -- NULL elsewhere on purpose, not approximated (see CHANGELOG.md).
+    xg_against_total        NUMERIC(5, 2),
+    xg_against_per_game     NUMERIC(4, 2) GENERATED ALWAYS AS
+        (ROUND(xg_against_total / NULLIF(games_played, 0), 2)) STORED,
+    saves_total              SMALLINT,
+    save_pct                 NUMERIC(5, 4) GENERATED ALWAYS AS
+        (ROUND(saves_total::numeric / NULLIF(saves_total + goals_conceded, 0), 4)) STORED,
+    -- Defensive work-rate/style profile (own actions, not conceded) —
+    -- distinguishes a high-press/high-turnover team from a deep low-block
+    -- one that just concedes little through structure.
+    avg_tackles       NUMERIC(4, 1),
+    avg_interceptions NUMERIC(4, 1),
+    avg_clearances    NUMERIC(4, 1),
+    duel_win_pct      NUMERIC(5, 4),
+    -- Ball-retention profile — main scope (1994-2026) only, sourced from the
+    -- separate world_cup_db reference project (StatsBomb/Sofascore, same
+    -- technique documented there) for 1994-2022; 2026 copied from this
+    -- project's own team_tournament_stats_fifa instead, since it already
+    -- exists here and is the more authoritative in-project source.
+    avg_possession_pct NUMERIC(4, 1),
+    pass_accuracy_pct  NUMERIC(5, 4),
+
     source                  VARCHAR(100) NOT NULL
 );
 
